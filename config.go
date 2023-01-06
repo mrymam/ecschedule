@@ -2,30 +2,40 @@ package ecschedule
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"path/filepath"
 	"text/template"
 
 	"github.com/goccy/go-yaml"
+	"github.com/google/go-jsonnet"
 	gc "github.com/kayac/go-config"
 )
 
 const defaultRole = "ecsEventsRole"
 
+const (
+	jsonnetExt = ".jsonnet"
+	jsonExt    = ".json"
+	ymlExt     = ".yml"
+	yamlExt    = ".yaml"
+)
+
 // BaseConfig baseconfig
 type BaseConfig struct {
-	Region    string `yaml:"region"`
-	Cluster   string `yaml:"cluster"`
-	AccountID string `yaml:"-"`
+	Region    string `yaml:"region" json:"region"`
+	Cluster   string `yaml:"cluster" json:"cluster"`
+	AccountID string `yaml:"-" json:"-"`
 }
 
 // Config config
 type Config struct {
-	Role        string `yaml:"role,omitempty"`
-	*BaseConfig `yaml:",inline"`
-	Rules       []*Rule   `yaml:"rules"`
-	Plugins     []*Plugin `yaml:"plugins,omitempty"`
+	Role        string `yaml:"role,omitempty" json:"role,omitempty"`
+	*BaseConfig `yaml:",inline" json:",inline"`
+	Rules       []*Rule   `yaml:"rules" json:"rules"`
+	Plugins     []*Plugin `yaml:"plugins,omitempty" json:"plugins,omitempty"`
 
 	templateFuncs []template.FuncMap
 	dir           string
@@ -61,7 +71,19 @@ func LoadConfig(ctx context.Context, r io.Reader, accountID string, confPath str
 	if err != nil {
 		return nil, err
 	}
-	if err := yaml.Unmarshal(bs, &c); err != nil {
+
+	ext := filepath.Ext(confPath)
+	if ext == jsonnetExt {
+		vm := jsonnet.MakeVM()
+		jsonStr, err := vm.EvaluateFile(confPath)
+		if err != nil {
+			return nil, err
+		}
+		bs = []byte(jsonStr)
+		ext = jsonExt
+	}
+
+	if err := unmarshalConfig(bs, &c, ext); err != nil {
 		return nil, err
 	}
 	c.AccountID = accountID
@@ -86,4 +108,16 @@ func LoadConfig(ctx context.Context, r io.Reader, accountID string, confPath str
 		r.mergeBaseConfig(c.BaseConfig, c.Role)
 	}
 	return &c, nil
+}
+
+// unmarshalConfig unmarshal json or yaml file
+func unmarshalConfig(bs []byte, c *Config, ext string) error {
+
+	switch ext {
+	case jsonExt:
+		return json.Unmarshal(bs, c)
+	case yamlExt, ymlExt:
+		return yaml.Unmarshal(bs, c)
+	}
+	return fmt.Errorf("not supported file type")
 }
